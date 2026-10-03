@@ -1,0 +1,14 @@
+# data: licence + size
+data/
+
+# environment
+.venv/
+
+# vscode
+.vscode/
+
+# python / tooling
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
