@@ -76,3 +76,48 @@ Some applicants have zero rows in a satellite table. How they are treated (no hi
   In days relative to the current application date. 0 = the day of application, negative = days before it (the past), positive = days after it (the future). A positive value is a leakage risk only if it records something that *happened* after the application; a date that was *planned* and known at application time (such as a scheduled end date) can be acceptable. Each such column is checked in Stage 5.
 - **Q3 — Who uses these features, and how does that change naming and documentation?**
   Both data scientists (who build and reuse them) and credit/model-risk reviewers (who approve them). So each feature gets a consistent, descriptive code name (`table_prefix_measure`, e.g. `bureau_active_debt_ratio`) that a data scientist can read, plus a catalog entry with a one-sentence business meaning, source, transformation, and edge rules that a credit officer can read without opening the code. The name alone can't carry all that; the catalog is where the reviewer gets the full definition.
+
+
+## Stage 2 — Baseline model
+
+**What I did:**
+- Wrote `src/split.py`, which creates the train / hold-out split once, saves the ID lists, and provides loaders (`load_train_ids`, `load_holdout_ids`) so later stages never re-split.
+- Ran it twice to confirm the split is reproducible and that re-running cannot silently replace it.
+- *Pending:* `src/evaluate.py`, baseline run in `01_baseline.ipynb`.
+
+**What I decided, and why:**
+
+*Split ratio — 80/20.* Total defaulters: ~24,825 (8.07% of 307,511). The 20% hold-out holds ~4,965 defaulters, enough for a stable AUC estimate; the 80% keeps ~19,860 defaulters for development. With a rare class, the number of positives, not rows, decides whether each part is large enough.
+
+*Stratified on TARGET.* Only ~8% of applicants default, so a purely random split could shift the default rate between parts. Stratifying keeps both parts at the overall rate, so the hold-out represents the same population I develop on.
+
+*Hold-out frozen, used once.* The hold-out is scored exactly once, at the end of Stage 6, for the final baseline and engineered models. It is not used for any feature design, selection or tuning decision before then. Every decision informed by it would leak it into development, and its score would stop being an honest estimate. Because the split is random, the hold-out estimates performance on unseen applicants from the same population and period, not on future applicants (see Stage 9 limitations: no out-of-time validation).
+
+*ID files stored in `data/splits/` (gitignored, not committed).* The split is reproducible from: the same `application_train.csv` (same content and row order), seed 47 (`src/config.py`), and the same scikit-learn version (pinned in `requirements.txt`, version: ___). Two controls make this safe without committing the files:
+1. **Verify, don't overwrite:** if the files exist, `split.py` regenerates the split and compares; it stops with an error if they differ and never replaces the saved files.
+2. **Fingerprints:** SHA-256 hashes (below) let anyone confirm they hold the identical split. Files are written with `\n` line endings, so the hashes match on Windows, Mac and Linux.
+These controls *detect* a changed split; they don't prevent one. Any mismatch must be investigated before the split is touched.
+
+*Pending:* baseline feature set, model choice, CV results.
+
+**What I checked, and the result (evidence):**
+
+| Check | Result |
+|---|---|
+| Input: row count = 307,511 | Pass |
+| Input: `SK_ID_CURR` unique | Pass |
+| Input: `TARGET` only 0/1 | Pass |
+| Counts: 246,008 + 61,503 = 307,511 | Pass |
+| No ID in both parts | Pass |
+| Default rate: overall 8.0729%, train 8.0729%, hold-out 8.0728% (within one applicant) | Pass |
+| Reproducibility: second run regenerated an identical split ("Split matches the saved files. Nothing written."), same hashes | Pass |
+
+Hashes:
+- `train_ids.csv`: `853b604ce03a8940ac9e318c9c464f6569375b7a55c0cce7fc886cba730bbfae`
+- `holdout_ids.csv`: `e3a1ee37f2ec813232aafa992814314807b7c50ee58d8b3445e6bd529a9e4b21`
+
+**What surprised me / open questions:**
+- pandas writes `\r\n` line endings on Windows by default, which would give different file hashes on different operating systems for identical IDs. Fixed by forcing `\n`.
+- Open: how to guarantee identical CV folds across feature sets in Stage 6 (row order after `build.py` merges). To resolve in `evaluate.py`.
+
+**Gate answers:** *Pending (after the baseline run).*
